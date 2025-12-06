@@ -90,6 +90,13 @@ local Library = {
         White = Color3.new(1, 1, 1),
     },
 
+        QuickAccessWidgets = {},
+    WidgetRadius = 60,
+    WidgetMaxItems = 8,
+    WidgetPosition = UDim2.fromOffset(100, 100),
+    WidgetVisible = true,
+    Widgets = {},
+    
     Registry = {},
     DPIRegistry = {},
 }
@@ -5178,6 +5185,249 @@ function Library:Notify(...)
     return Data
 end
 
+function Library:CreateQuickAccessWidget(WidgetInfo)
+    WidgetInfo = WidgetInfo or {}
+    local Name = WidgetInfo.Name or "Widget" .. tostring(#Library.QuickAccessWidgets + 1)
+    local Radius = WidgetInfo.Radius or Library.WidgetRadius
+    local Position = WidgetInfo.Position or Library.WidgetPosition
+    local Visible = WidgetInfo.Visible ~= false
+
+    local Holder = New("Frame", {
+        BackgroundColor3 = "MainColor",
+        BorderColor3 = "OutlineColor",
+        BorderSizePixel = 1,
+        Position = Position,
+        Size = UDim2.fromOffset(Radius * 2 + 40, Radius * 2 + 40),
+        Visible = Visible,
+        ZIndex = 15,
+        Parent = ScreenGui,
+    })
+    New("UICorner", {
+        CornerRadius = UDim.new(1, 0),
+        Parent = Holder,
+    })
+
+    local DragArea = New("TextButton", {
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Text = "",
+        ZIndex = 16,
+        Parent = Holder,
+    })
+
+    local Widget = {
+        Name = Name,
+        Radius = Radius,
+        Position = Position,
+        Visible = Visible,
+        Holder = Holder,
+        DragArea = DragArea,
+        Items = {},
+        Toggled = WidgetInfo.Default or true,
+    }
+
+    local Dragging = false
+    local StartPos, FramePos
+    local DragStartTime = 0
+
+    DragArea.InputBegan:Connect(function(Input)
+        if Input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           Input.UserInputType == Enum.UserInputType.Touch then
+            DragStartTime = tick()
+            
+            while tick() - DragStartTime < 0.5 do
+                if not (Input.UserInputState == Enum.UserInputState.Begin) then
+                    return
+                end
+                game:GetService("RunService").Heartbeat:Wait()
+            end
+            
+            Dragging = true
+            StartPos = game:GetService("UserInputService"):GetMouseLocation()
+            FramePos = Holder.Position
+            
+            while Dragging do
+                local Mouse = game:GetService("UserInputService"):GetMouseLocation()
+                local Delta = Vector2.new(Mouse.X - StartPos.X, Mouse.Y - StartPos.Y)
+                Holder.Position = UDim2.new(
+                    FramePos.X.Scale, FramePos.X.Offset + Delta.X,
+                    FramePos.Y.Scale, FramePos.Y.Offset + Delta.Y
+                )
+                game:GetService("RunService").RenderStepped:Wait()
+            end
+        end
+    end)
+
+    DragArea.InputEnded:Connect(function(Input)
+        if Input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           Input.UserInputType == Enum.UserInputType.Touch then
+            Dragging = false
+        end
+    end)
+
+    function Widget:AddItem(ItemInfo)
+        if #self.Items >= Library.WidgetMaxItems then
+            return nil
+        end
+
+        local Item = {
+            Text = ItemInfo.Text or "Item",
+            Callback = ItemInfo.Callback,
+            Tooltip = ItemInfo.Tooltip,
+            Visible = ItemInfo.Visible ~= false,
+            Index = #self.Items + 1,
+        }
+
+        local angle = (Item.Index - 1) * (2 * math.pi / math.max(#self.Items + 1, 1))
+        local x = math.cos(angle) * self.Radius
+        local y = math.sin(angle) * self.Radius
+
+        local Button = New("TextButton", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = self.Toggled and "AccentColor" or "MainColor",
+            BorderColor3 = "OutlineColor",
+            BorderSizePixel = 1,
+            Position = UDim2.new(0.5, x, 0.5, y),
+            Size = UDim2.fromOffset(30, 30),
+            Text = "",
+            Visible = Item.Visible,
+            ZIndex = 17,
+            Parent = Holder,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = Button,
+        })
+
+        local Label = New("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0),
+            BackgroundColor3 = "BackgroundColor",
+            BorderColor3 = "OutlineColor",
+            BorderSizePixel = 1,
+            Position = UDim2.new(0.5, 0, 0, 35),
+            Size = UDim2.new(0, 50, 0, 18),
+            Text = Item.Text,
+            TextSize = 11,
+            TextWrapped = true,
+            Visible = false,
+            ZIndex = 18,
+            Parent = Button,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(0, 4),
+            Parent = Label,
+        })
+
+        Button.MouseEnter:Connect(function()
+            Label.Visible = true
+        end)
+        
+        Button.MouseLeave:Connect(function()
+            Label.Visible = false
+        end)
+        
+        Button.MouseButton1Click:Connect(function()
+            if Item.Callback then
+                Library:SafeCallback(Item.Callback)
+            end
+        end)
+
+        Item.Button = Button
+        Item.Label = Label
+        table.insert(self.Items, Item)
+
+        self:UpdateLayout()
+
+        return Item
+    end
+
+    function Widget:UpdateLayout()
+        for i, Item in ipairs(self.Items) do
+            local angle = (i - 1) * (2 * math.pi / #self.Items)
+            local x = math.cos(angle) * self.Radius
+            local y = math.sin(angle) * self.Radius
+            
+            Item.Button.Position = UDim2.new(0.5, x, 0.5, y)
+        end
+    end
+
+    function Widget:SetToggled(Value)
+        self.Toggled = Value
+        
+        if Value then
+            self.Holder.BackgroundColor3 = Library.Scheme.AccentColor
+            Library.Registry[self.Holder].BackgroundColor3 = "AccentColor"
+            for _, Item in ipairs(self.Items) do
+                Item.Button.BackgroundColor3 = Library.Scheme.AccentColor
+                Library.Registry[Item.Button].BackgroundColor3 = "AccentColor"
+            end
+        else
+            self.Holder.BackgroundColor3 = Library.Scheme.MainColor
+            Library.Registry[self.Holder].BackgroundColor3 = "MainColor"
+            for _, Item in ipairs(self.Items) do
+                Item.Button.BackgroundColor3 = Library.Scheme.MainColor
+                Library.Registry[Item.Button].BackgroundColor3 = "MainColor"
+            end
+        end
+    end
+
+    function Widget:SetRadius(Radius)
+        self.Radius = Radius
+        self.Holder.Size = UDim2.fromOffset(Radius * 2 + 40, Radius * 2 + 40)
+        self:UpdateLayout()
+    end
+
+    function Widget:SetVisible(Visible)
+        self.Visible = Visible
+        self.Holder.Visible = Visible
+    end
+
+    function Widget:Destroy()
+        self.Holder:Destroy()
+        Library.QuickAccessWidgets[self.Name] = nil
+        Library.Widgets[self.Name] = nil
+        for i, w in ipairs(Library.Widgets) do
+            if w.Name == self.Name then
+                table.remove(Library.Widgets, i)
+                break
+            end
+        end
+    end
+
+    Widget:SetToggled(Widget.Toggled)
+    Library.QuickAccessWidgets[Name] = Widget
+    Library.Widgets[Name] = Widget
+    table.insert(Library.Widgets, Widget)
+
+    return Widget
+end
+
+function Library:GetQuickAccessWidget(WidgetName)
+    return Library.QuickAccessWidgets[WidgetName]
+end
+
+function Library:SetAllWidgetsVisible(Visible)
+    Library.WidgetVisible = Visible
+    for _, Widget in pairs(Library.QuickAccessWidgets) do
+        Widget:SetVisible(Visible)
+    end
+end
+
+function Library:SetAllWidgetsRadius(Radius)
+    Library.WidgetRadius = Radius
+    for _, Widget in pairs(Library.QuickAccessWidgets) do
+        Widget:SetRadius(Radius)
+    end
+end
+
+function Library:ClearAllWidgets()
+    for Name, Widget in pairs(Library.QuickAccessWidgets) do
+        Widget:Destroy()
+    end
+    Library.QuickAccessWidgets = {}
+    Library.Widgets = {}
+        end
+        
 function Library:CreateWindow(WindowInfo)
     WindowInfo = Library:Validate(WindowInfo, Templates.Window)
     local ViewportSize: Vector2 = workspace.CurrentCamera.ViewportSize
